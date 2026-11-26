@@ -1,6 +1,6 @@
 # DSH 内网服务器与手机客户端 v1 实施规格
 
-> 状态：v1.1（2026-11-26，生产 smoke 修正）· 类型：可实施规格 · 地图：[DSH 内网服务器与手机客户端 v1](https://github.com/Ar1-s/dsh_dev/issues/1)
+> 状态：v1.2（2026-11-26，插件启停与本地优先补充）· 类型：可实施规格 · 地图：[DSH 内网服务器与手机客户端 v1](https://github.com/Ar1-s/dsh_dev/issues/1)
 >
 > 本文件是地图 #1 的目的地交付物。它把 #2–#14 已收口的结论合拢成一份可以直接照做的规格；实现代码不在本轮，实施按 §13 的顺序拆票。
 >
@@ -343,6 +343,10 @@ if [ "$need_seed" = 1 ]; then
   fi
   mkdir -p "$DSH_HOME/profiles"
   cp -a "$SEED" "$DSH_HOME/profiles/web"
+  # 保留用户 patch（插件启停/覆盖）；运行时安装的依赖仍以镜像为准
+  if [ -f "$DSH_HOME/profiles/web.bak-$ts/cordis.patch.yml" ]; then
+    cp -a "$DSH_HOME/profiles/web.bak-$ts/cordis.patch.yml" "$DSH_HOME/profiles/web/cordis.patch.yml"
+  fi
   chown -R 1000:1000 "$DSH_HOME/profiles/web"
   log "profile seed refreshed ($ts)"
 fi
@@ -377,6 +381,7 @@ exec setpriv --reuid=1000 --regid=1000 --clear-groups \
 - `--dump-config` 会写 profile，因此必须在 uid 1000 可写之后、以 1000 执行；本机 rc.5 的 profile 必须可写（#7 已记录）。
 - 每次启动都会重写 `cordis.yml`，但不会重装插件；插件更新靠镜像 + seed 指纹刷新。
 - 非空卷会遮住镜像里的 `profiles`；所以 seed 刷新不是可选项。
+- seed 刷新会保留旧 profile 的 `cordis.patch.yml`（插件启停/用户覆盖）；不保留运行时安装的依赖与 `node_modules`。只做启停时不需要 pnpm；运行时 install/remove 另见 §20。
 - `setpriv --clear-groups` 在 Debian bookworm 可用；若目标基础镜像没有 `setpriv`，用 `gosu 1000:1000` 等价替换，但必须在规格里改。
 - `--patch` 的 patch 文件内容见 §6.2。
 
@@ -1391,7 +1396,7 @@ window.__ModuleLoader__.load({
 - staging：同一 compose + 卷快照副本（或 staging 主机），跑 §12 的装配/登录/上传/下载冒烟；通过后再切。
 - 升级前后各打一次整卷快照（`dsh-home` + `dsh-workspace` + `caddy-data`）。
 - 本地保留最近 3 个镜像 tag；旧 tag 不删。
-- profile seed 指纹变化会触发 profiles 备份并替换；旧 profiles 保留最近 3 份。
+- profile seed 指纹变化会触发 profiles 备份并替换；旧 profiles 保留最近 3 份；替换时保留用户 `cordis.patch.yml`，所以插件启停状态跨镜像升级保留。
 - 零版本豁免；升级前若临时加过豁免，升级后重评并清空。
 - 不承诺 DSH 降级后的数据兼容：session 格式只向前、旧 build 遇到更高格式会拒绝；credentials 只认 `version: 1`。
 
@@ -1524,7 +1529,7 @@ docker run --rm \
 | 里程碑 | 交付 | 验收 |
 |---|---|---|
 | M0 | 本规格 + 研究笔记 + 原型链接 | 维护者复核；地图 #1 更新 |
-| M1 | 镜像骨架 + Caddy + `/login/` + 空白 web profile + 卷/entrypoint | §12 A、B；能登录、会话可用、无文件桥 |
+| M1 | 镜像骨架 + Caddy + `/login/` + 空白 web profile + 卷/entrypoint；本机 Docker 先跑通 | §12 A、B；能登录、会话可用、无文件桥 |
 | M2 | 文件桥宿主半：capabilities/upload/commit/delete/uploads + manifest + sweep | §12 C（除 UI）；curl 全绿 |
 | M3 | 文件桥浏览器半：+ 面板/托盘/chip/source codec + 桌面浏览器 | §12 C 剩余 + D 桌面部分 |
 | M4 | 手机真机：iOS/Android 四入口、HEIC/MOV、下载、窄屏 | §12 D、E 真机 |
@@ -1711,6 +1716,8 @@ docker run --rm \
 
 ## 19. 生产 smoke 记录（2026-11-26，隔离测试容器）
 
+> 注意：按 AGENTS.md 的本地优先规则，后续容器构建与调试先在本机 Docker 跑通，再到生产测试机联调；本轮是在规则落档前的例外。
+
 > 目的：在不碰生产容器/服务的前提下，验证 rc.5 能启动、认证可用、90 天补丁与 client bundle 路由。不是完整 M1。
 
 - 宿主：Ubuntu 22.04.5，Docker 29.2.1，20 核 / 31 GiB，/data 738G 可用；现有 4 个容器（postgres_db、node01/02/03）与 8081/18090 两个服务未动。
@@ -1723,3 +1730,38 @@ docker run --rm \
 - 未验证：Caddy/TLS/Set-Cookie Secure（镜像拉取超时）、文件桥五条路由（插件未构建）、手机真机、PTY/终端端到端、升级回滚/备份。
 - 清理：测试容器、专用网络、node 镜像与 `/data/dsh-test` 已删除；生产 4 个容器未动。
 
+---
+
+## 20. 插件启停管理（2026-11-26 补充）
+
+### 20.1 范围
+
+v1.2 只做**全局**插件启用/禁用：一个 profile，所有客户端看到同一张 Host 插件图。不做 per-user/per-device，不做移动端专用插件表，不做运行时 install/remove。
+
+### 20.2 管理面
+
+- 原生 Web 侧栏「插件」页就是管理界面；它调用 `ctx.pluginManager` 的 `listPlugins` / `listBundles` / `setPluginEnabled` / `setBundleEnabled`，写 `profiles/web/cordis.patch.yml` 与 `dsh.profile.bundles`。
+- 如果要独立管理员 API，做一个薄插件：`ctx.inject(['connection','pluginManager'], ...)`，注册 `/api/admin/plugins` 精确 Fetch 路由，只封装 list/toggle；加独立管理员鉴权/审计；不要 import 内部实现。只做启停不需要 pnpm。
+- 管理类插件与预设行可能只读（`management-required` / `unaddressable`）；不要试图绕过。
+
+### 20.3 客户端同步
+
+- `dsh-client-hmr` + `dsh-client-modules`：已打开的页面跟随 Host 图；启用加载 client bundle，禁用卸载并回收 slot/样式；客户端不需要安装。
+- 同一 release 下不需要刷新页面；没有 HMR、需要 Host 重启或 release 变化时，按 `restart-required` 或刷新页面处理。
+- 设置里的插件列表是只读投影；同步失败可在该页重试，不改变 Host 启用状态。
+
+### 20.4 影响面
+
+- 只停/启被点名的插件行（以及 Cordis 服务依赖方）；会话、其他插件、工作区/连接状态保留。
+- 被停插件的 UI 会卸载，组件内未保存状态丢失；正在使用该插件的 tool call 可能失败。
+- 切换 bundle 会影响该 bundle 的所有行；install/remove 与镜像升级影响更大，放维护窗口。
+- 不要在工作时段切换 core/management 插件；leaf UI 插件启停可在工作时段做，但建议窗口。
+
+### 20.5 持久化与升级
+
+- 插件启停写在 `profiles/web/cordis.patch.yml`；entrypoint 的 seed 刷新必须保留/合并这个用户 patch，否则镜像升级后启停状态回到 seed（§5.3 已按此修）。
+- `package.json` / `node_modules` 的运行时安装不在 v1；官方插件安装走构建期/CI，客户端自动加载。运行时 install/remove 需要 pnpm 运行时与 profile 作为事实源，另开 effort。
+
+### 20.6 维护窗口
+
+插件表很少变；简单 leaf UI 插件启停可在工作时段做，但建议窗口；bundle install/remove、core/management、DSH 镜像升级必须窗口。变更前备份 profile；变更后按 §12 验证。
