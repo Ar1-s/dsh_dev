@@ -232,6 +232,7 @@ FROM ${NODE_IMAGE} AS build
 ARG DSH_VERSION=0.2.2-rc.5
 ARG PNPM_VERSION=11.28.5
 ARG LASER_COMMIT=<写进 versions.lock>
+ARG BUILD_REVISION=<build commit>
 
 ENV DSH_HOME=/opt/dsh-seed \
     DEBIAN_FRONTEND=noninteractive
@@ -268,7 +269,8 @@ const p='/opt/dsh-seed/profiles/web';\
 const h=c.createHash('sha256');\
 for(const f of ['package.json','pnpm-lock.yaml','cordis.patch.yml','cordis.yml'])\
   h.update(fs.readFileSync(p+'/'+f));\
-fs.writeFileSync(p+'/.seed-id',h.digest('hex')+'\\n')"
+fs.writeFileSync(p+'/.seed-id',h.digest('hex')+'\\n')" \
+ && echo "$BUILD_REVISION" >> /opt/dsh-seed/profiles/web/.seed-id
 
 FROM ${NODE_IMAGE}
 ARG DSH_VERSION=0.2.2-rc.5
@@ -300,6 +302,7 @@ ENTRYPOINT ["/usr/local/bin/dsh-entrypoint"]
 - 运行阶段不装 pnpm、不需要外网；插件已随 profile 的 `node_modules` 打好。
 - 只 `COPY` 运行所需；`/opt/plugins` 保留源目录便于排障与 `file:` 路径一致。
 - HEIC 解码依赖在构建期装进 profile（见 §9.9）；不要依赖运行期安装。
+- seed 指纹必须包含 `BUILD_REVISION`（构建 commit）或插件文件哈希：只哈希 profile 文件时，插件源码变了但版本号没变会导致卷里的旧 profile 不刷新。
 - 若激光插件仓是私有的，构建机的只读凭据只用于 clone；不要把 token 写进 Dockerfile、构建参数或镜像层。
 
 ### 5.3 entrypoint（规范性骨架）
@@ -541,8 +544,9 @@ f.addEventListener('submit', async (ev) => {
     const res = await fetch('/?token=' + encodeURIComponent(token), {
       credentials: 'same-origin', cache: 'no-store'
     });
-    if (res.ok) { location.replace('/'); return; }
-    throw new Error('bad token');
+    if (res.status === 401) { e.textContent = 'token 无效或已过期'; return; }
+    if (!res.ok) throw new Error('login failed');
+    location.replace('/');
   } catch (_) {
     // 兜底：同源 iframe 导航，等它落 cookie 后再进应用
     const frame = document.createElement('iframe');
@@ -1119,6 +1123,22 @@ manifest 行（`manifest-YYYY-MM-DD.jsonl`，UTF-8，一行一个 JSON，行内�
 - 精确 Fetch 路由只对 owner Peer 开放；不要注册裸 `webServer` 路由。不要接受 `Authorization` 头 token。
 - 单用户内网边界：DSH 的 read 是宿主级、write 受 cwd 限制；文件桥只写 `inbox/`；接受 `read-any`，不做 workspace 白名单（#10 Q4 A）。不承诺多用户隔离。
 - 日志不打印原始字节/完整 token；错误信息不回显绝对路径（客户端只拿相对 path）。
+
+
+MIME 嗅探表（magic bytes，按顺序匹配；不信任 Content-Type）：
+
+| 类型 | 判据 |
+|---|---|
+| JPEG | 起始 FF D8 FF |
+| PNG | 起始 89 50 4E 47 |
+| GIF | 起始 47 49 46 38 |
+| WebP | RIFF 开头，偏移 8 处为 WEBP |
+| HEIC/HEIF | ftyp box 的 brand 为 heic / heix / hevc / mif1 / msf1 |
+| PDF | 起始 %PDF- |
+| ZIP/Office | 起始 PK 03 04 |
+| MP4/MOV | ftyp box 的 brand 为 isom / mp42 / qt（两个空格） |
+| 其他 | application/octet-stream |
+
 
 ### 9.9 HEIC/HEIF 与 MOV
 
