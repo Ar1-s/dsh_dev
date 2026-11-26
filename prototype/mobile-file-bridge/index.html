@@ -178,6 +178,8 @@ body.shot .notch{display:none}
       <a href="?demo=failed">失败三分支 <span>断网 / 413 / 401</span></a>
       <a href="?demo=chip">路径进草稿 <span>chip + 文本</span></a>
       <a href="?demo=sent">已发送 <span>agent 看到路径</span></a>
+      <a href="?demo=sentonly">只发附件 <span>不写字也能发</span></a>
+      <a href="?demo=removed">撤 chip <span>工作区文件静默删除</span></a>
       <a href="?demo=files">工作区下载 <span>≤50MB</span></a>
       <a href="?demo=download">下载已请求 <span>浏览器决定落点</span></a>
       <a href="?demo=login">登录页 <span>token 换 cookie</span></a>
@@ -287,6 +289,8 @@ function addDemo(n, status){
 }
 function seed(demo){
   S.tray = []; S.chips = []; S.draft = ''; S.sheet = false; S.panel = false; S.paused = false;
+  S.bootToast = '';
+  seedWorkspace();
   baseMsgs();
   if (demo === 'login'){ S.view = 'login'; return; }
   S.view = 'chat';
@@ -325,6 +329,29 @@ function seed(demo){
     }
     S.paused = true; return;
   }
+  if (demo === 'sentonly'){
+    addDemo(2, '');
+    var ps = [];
+    for (var j = 0; j < S.tray.length; j++){
+      var it2 = S.tray[j]; it2.status = 'ok'; it2.loaded = it2.size; it2.path = inboxPath(it2, j);
+      ps.push({ id:it2.id, name:it2.name, path:it2.path, size:it2.size, file:it2 });
+    }
+    S.tray = []; S.chips = [];
+    S.msgs.push({ role:'user', text:'', atts: ps });
+    S.msgs.push({ role:'agent', text:'收到 ' + ps.length + ' 个文件：<span class="mono">' + esc(ps[0].path) + '</span>、<span class="mono">' + esc(ps[1].path) + '</span>。要我把它们并进周报，还是先各看一眼？' });
+    S.paused = true; return;
+  }
+  if (demo === 'removed'){
+    addDemo(2, '');
+    var keep = S.tray[0], drop = S.tray[1];
+    keep.status = 'ok'; keep.loaded = keep.size; keep.path = inboxPath(keep, 0);
+    drop.path = inboxPath(drop, 1);
+    S.tray = [];
+    S.chips = [{ id:keep.id, name:keep.name, path:keep.path, size:keep.size, file:keep }];
+    S.workspace = (S.workspace || []).filter(function(f){ return f.path !== drop.path; });
+    S.bootToast = '已撤出上下文 · 工作区里的 ' + drop.name + ' 已静默删除';
+    S.paused = true; return;
+  }
   if (demo === 'files'){ S.panel = true; return; }
   if (demo === 'download'){ S.panel = true; S.dl['Q3-report.pdf'] = 'requested'; return; }
   S.paused = false;
@@ -344,7 +371,7 @@ function msgsHTML(){
     if (m.role === 'agent'){
       h += '<div class="msg agent"><div class="who">DSH</div><div class="body">' + m.text + '</div></div>';
     } else {
-      h += '<div class="msg user"><div class="bubble"><div>' + esc(m.text) + '</div>';
+      h += '<div class="msg user"><div class="bubble">' + (m.text ? '<div>' + esc(m.text) + '</div>' : '');
       (m.atts || []).forEach(function(a){
         h += '<div class="uatt">' + ICON.clip + '<div><div class="an">' + esc(a.name) + ' · ' + mb(a.size) + '</div>'
           + '<div class="ap">' + esc(a.path) + '</div></div></div>';
@@ -406,12 +433,12 @@ function composerHTML(){
     });
     h += '</div>';
     h += '<div class="chipnote">' + (S.pathMode === 'inject'
-      ? '路径已加入本会话上下文 · agent 下一轮能看到（撤 chip 不撤上下文）'
+      ? '点发送时才把路径写进这条消息的上下文 · 撤 chip 会连同工作区文件一起删掉'
       : '路径已写进草稿，会随这条消息一起发出') + '</div>';
   }
   h += '<div class="inputrow"><textarea class="ta" id="draft" rows="1" placeholder="发消息…">' + esc(S.draft) + '</textarea>'
     + '<button class="plus" data-act="sheet">' + ICON.plus + '</button>'
-    + '<button class="send' + (S.draft.trim() ? '' : ' off') + '" data-act="send">' + ICON.send + '</button></div>';
+    + '<button class="send' + ((S.draft.trim() || S.chips.length) ? '' : ' off') + '" data-act="send">' + ICON.send + '</button></div>';
   return h + '</div>';
 }
 function viewChat(){
@@ -442,16 +469,19 @@ function sopt(src, t, d, attrs){
     + '<span class="st">' + t + '</span><span class="sd">' + d + '</span>'
     + '<input type="file" data-act="pick" ' + attrs + '></label>';
 }
-var FILES = [
-  { name:'Q3-report.pdf', size:1.2*1048576, note:'本次上传 · 2026-11-26 14:30' },
-  { name:'IMG_0421.jpg', size:3.4*1048576, note:'HEIC 派生 · 2026-11-26 14:30' },
-  { name:'VID_0424.mov', size:84.6*1048576, note:'超过 50MB 下载上限' }
-];
+function seedWorkspace(){
+  S.workspace = [
+    { name:'Q3-report.pdf', size:1.2*1048576, path:'inbox/2026/11/26/phone-a1b2/1430-3f2a-report.pdf', note:'本次上传 · 2026-11-26 14:30' },
+    { name:'IMG_0421.jpg', size:3.4*1048576, path:'inbox/2026/11/26/phone-a1b2/1430-3f2a-img-0421.jpg', note:'HEIC 派生 · 2026-11-26 14:30' },
+    { name:'VID_0424.mov', size:84.6*1048576, path:'inbox/2026/11/26/phone-a1b2/1431-9b1e-vid-0424.mov', note:'超过 50MB 下载上限' }
+  ];
+  S.dl = {};
+}
 function panelHTML(){
   var h = '<div class="panel"><div class="phead"><button class="icobtn" data-act="panel-close">✕</button>'
     + '<div class="t"><div>文件</div><div class="s">/data/workspaces/main</div></div></div><div class="pscroll">'
     + '<div class="crumb">inbox / 2026/11/26 / ' + DEVICE + '/</div>';
-  FILES.forEach(function(f){
+  (S.workspace || []).forEach(function(f){
     var big = f.size > 50 * 1048576;
     var st = S.dl[f.name];
     h += '<div class="frow' + (st === 'requested' ? ' done' : '') + '"><div class="fi">' + (/\.(mov|mp4)$/i.test(f.name) ? ICON.video : (/\.pdf$/i.test(f.name) ? ICON.file : ICON.image)) + '</div>'
@@ -517,7 +547,7 @@ function bindInputs(){
       S.draft = ta.value;
       fit();
       var btn = document.querySelector('[data-act="send"]');
-      if (btn) btn.className = 'send' + (S.draft.trim() ? '' : ' off');
+      if (btn) btn.className = 'send' + ((S.draft.trim() || S.chips.length) ? '' : ' off');
     });
   }
   var inputs = document.querySelectorAll('input[type=file]');
@@ -664,7 +694,7 @@ function succeedItem(it){
   render();
   if (!S.tray.length){
     stopLoop();
-    toast(S.pathMode === 'inject' ? '已写入工作区 · 路径已加入本会话上下文，agent 下一轮能看到' : '已写入工作区 · 路径已进草稿', 'view-files');
+    toast(S.pathMode === 'inject' ? '已写入工作区 · 发送时会带上路径' : '已写入工作区 · 路径已进草稿', 'view-files');
   }
   else pump();
 }
@@ -688,6 +718,13 @@ function unChip(id){
   var c = S.chips.filter(function(x){ return x.id === id; })[0];
   if (!c) return;
   S.chips = S.chips.filter(function(x){ return x.id !== id; });
+  if (S.pathMode === 'inject' && c.path){
+    var gone = (S.workspace || []).filter(function(f){ return f.path === c.path; })[0];
+    S.workspace = (S.workspace || []).filter(function(f){ return f.path !== c.path; });
+    render();
+    toast('已撤出上下文' + (gone ? ' · 工作区里的 ' + gone.name + ' 已静默删除' : ''));
+    return;
+  }
   if (S.pathMode === 'draft'){
     var lines = S.draft.split('\n').filter(function(l){ return l.replace(/\s+$/, '') !== '[附件] ' + c.path; });
     S.draft = lines.join('\n');
@@ -697,14 +734,16 @@ function unChip(id){
 }
 function doSend(){
   var text = S.draft.trim();
-  if (!text) return;
   var atts = S.chips.slice();
+  if (!text && !atts.length) return;
   S.msgs.push({ role:'user', text:text, atts:atts });
   S.draft = ''; S.chips = []; S.tray = S.tray.filter(function(i){ return i.status !== 'ok'; });
   render();
   setTimeout(function(){
     if (atts.length){
-      S.msgs.push({ role:'agent', text:'收到 ' + atts.length + ' 个附件，路径在工作区里能直接读：<span class="mono">' + esc(atts[0].path) + '</span>。我先按日期归并，再写周报。' });
+      S.msgs.push({ role:'agent', text: text
+        ? '收到 ' + atts.length + ' 个附件，路径在工作区里能直接读：<span class="mono">' + esc(atts[0].path) + '</span>。我先按日期归并，再写周报。'
+        : '收到 ' + atts.length + ' 个文件：<span class="mono">' + esc(atts[0].path) + '</span>' + (atts[1] ? '、<span class="mono">' + esc(atts[1].path) + '</span>' : '') + '。要我把它们并进周报，还是先各看一眼？' });
     } else {
       S.msgs.push({ role:'agent', text:'收到。' });
     }
@@ -712,7 +751,7 @@ function doSend(){
   }, 900);
 }
 function doDownload(name){
-  var f = FILES.filter(function(x){ return x.name === name; })[0];
+  var f = (S.workspace || []).filter(function(x){ return x.name === name; })[0];
   if (!f) return;
   if (f.size > 50 * 1048576){ toast('超过 v1 的 50 MiB 下载上限，先不做流式。'); return; }
   S.dl[name] = 'requested';
@@ -746,6 +785,7 @@ seed(P.demo || 'chat');
 if (P.demo === 'uploading' || P.demo === 'retrying' || P.demo === 'failed' || P.demo === 'chip' || P.demo === 'sent') armAll();
 render();
 if (!S.paused && S.view === 'chat') pump();
+if (S.bootToast) toast(S.bootToast);
 var d = new Date();
 var clock = document.getElementById('clock');
 if (clock) clock.textContent = ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2);
