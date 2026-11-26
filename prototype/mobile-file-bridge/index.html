@@ -324,6 +324,7 @@ function seed(demo){
     if (demo === 'sent'){
       var atts = S.chips.slice();
       S.chips = []; S.draft = '';
+      atts.forEach(function(c){ (S.workspace = S.workspace || []).unshift({ name:c.name, size:c.size, path:c.path, note:'本次提交 · ' + nowLabel() }); });
       S.msgs.push({ role:'user', text:'把这两张按日期整理进周报。', atts: atts });
       S.msgs.push({ role:'agent', text:'读到 ' + atts.length + ' 个附件：<span class="mono">' + esc(atts[0].path) + '</span>（' + mb(atts[0].size) + '，HEIC 已在服务端转 JPEG）和 <span class="mono">' + esc(atts[1].path) + '</span>。我先把它们并进周报，再补一段这周的结论。' });
     }
@@ -337,6 +338,7 @@ function seed(demo){
       ps.push({ id:it2.id, name:it2.name, path:it2.path, size:it2.size, file:it2 });
     }
     S.tray = []; S.chips = [];
+    ps.forEach(function(c){ (S.workspace = S.workspace || []).unshift({ name:c.name, size:c.size, path:c.path, note:'本次提交 · ' + nowLabel() }); });
     S.msgs.push({ role:'user', text:'', atts: ps });
     S.msgs.push({ role:'agent', text:'收到 ' + ps.length + ' 个文件：<span class="mono">' + esc(ps[0].path) + '</span>、<span class="mono">' + esc(ps[1].path) + '</span>。要我把它们并进周报，还是先各看一眼？' });
     S.paused = true; return;
@@ -348,8 +350,7 @@ function seed(demo){
     drop.path = inboxPath(drop, 1);
     S.tray = [];
     S.chips = [{ id:keep.id, name:keep.name, path:keep.path, size:keep.size, file:keep }];
-    S.workspace = (S.workspace || []).filter(function(f){ return f.path !== drop.path; });
-    S.bootToast = '已撤出上下文 · 工作区里的 ' + drop.name + ' 已静默删除';
+    S.bootToast = '已撤出 · ' + drop.name + ' 的暂存已删除，工作区没有写入任何东西';
     S.paused = true; return;
   }
   if (demo === 'files'){ S.panel = true; return; }
@@ -433,7 +434,7 @@ function composerHTML(){
     });
     h += '</div>';
     h += '<div class="chipnote">' + (S.pathMode === 'inject'
-      ? '点发送时才把路径写进这条消息的上下文 · 撤 chip 会连同工作区文件一起删掉'
+      ? '已暂存在 inbox/.pending/ · 按发送才提交到 inbox/，撤 chip 只删暂存'
       : '路径已写进草稿，会随这条消息一起发出') + '</div>';
   }
   h += '<div class="inputrow"><textarea class="ta" id="draft" rows="1" placeholder="发消息…">' + esc(S.draft) + '</textarea>'
@@ -688,7 +689,8 @@ function failItem(it){
 function succeedItem(it){
   it.status = 'ok'; it.loaded = it.size;
   it.path = inboxPath(it, S.chips.length + S.tray.filter(function(x){ return x.status === 'ok'; }).length);
-  S.chips.push({ id:it.id, name:it.name, path:it.path, size:it.size, file:it });
+  it.pending = 'inbox/.pending/' + it.id + '-' + HASH[S.chips.length % 4];
+  S.chips.push({ id:it.id, name:it.name, path:it.path, pending:it.pending, size:it.size, file:it });
   if (S.pathMode === 'draft') S.draft = (S.draft ? S.draft.replace(/\s+$/, '') + '\n' : '') + '[附件] ' + it.path;
   S.tray = S.tray.filter(function(x){ return x.id !== it.id; });
   render();
@@ -718,11 +720,9 @@ function unChip(id){
   var c = S.chips.filter(function(x){ return x.id === id; })[0];
   if (!c) return;
   S.chips = S.chips.filter(function(x){ return x.id !== id; });
-  if (S.pathMode === 'inject' && c.path){
-    var gone = (S.workspace || []).filter(function(f){ return f.path === c.path; })[0];
-    S.workspace = (S.workspace || []).filter(function(f){ return f.path !== c.path; });
+  if (S.pathMode === 'inject'){
     render();
-    toast('已撤出上下文' + (gone ? ' · 工作区里的 ' + gone.name + ' 已静默删除' : ''));
+    toast('已撤出 · 暂存文件已删除，工作区没有写入任何东西');
     return;
   }
   if (S.pathMode === 'draft'){
@@ -736,6 +736,12 @@ function doSend(){
   var text = S.draft.trim();
   var atts = S.chips.slice();
   if (!text && !atts.length) return;
+  if (S.pathMode === 'inject' && atts.length){
+    atts.forEach(function(c){
+      (S.workspace = S.workspace || []).unshift({ name:c.name, size:c.size, path:c.path, note:'本次提交 · ' + nowLabel() });
+    });
+    toast('已提交 ' + atts.length + ' 个文件到 inbox/ · 路径已注入这条消息');
+  }
   S.msgs.push({ role:'user', text:text, atts:atts });
   S.draft = ''; S.chips = []; S.tray = S.tray.filter(function(i){ return i.status !== 'ok'; });
   render();
