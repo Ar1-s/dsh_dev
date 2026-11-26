@@ -74,7 +74,9 @@ body.shot .notch{display:none}
 .chip{display:flex;align-items:center;gap:6px;max-width:100%;background:#16202f;border:1px solid #2b3f5e;border-radius:9px;padding:4px 7px;font-size:10.5px;color:#b9cde8}
 .chip svg{width:12px;height:12px;color:#7fa8e8;flex:0 0 auto}
 .chip span{max-width:210px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chip .csz{font-style:normal;color:#6f7a8a;font-size:9.5px}
 .chip button{border:0;background:transparent;color:#7d8796;font-size:13px;line-height:1;padding:0 1px;cursor:pointer}
+.chipnote{font-size:9.5px;color:#5f6a78;margin:-1px 0 6px;line-height:1.4}
 .inputrow{display:flex;align-items:flex-end;gap:7px}
 .ta{flex:1;min-width:0;min-height:40px;max-height:88px;resize:none;border-radius:14px;border:1px solid #232c38;background:#121821;
  color:#e9edf2;padding:10px 12px;font-size:16px;line-height:1.4;font-family:inherit;scrollbar-width:none}
@@ -92,12 +94,12 @@ body.shot .notch{display:none}
 .sheet h3{margin:0 0 12px;font-size:13px;color:#c6d2e2;display:flex;justify-content:space-between;align-items:center}
 .sheet h3 em{font-style:normal;font-size:10.5px;color:#6f7a8a;font-weight:400}
 .sgrid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
-.sopt{display:flex;flex-direction:column;gap:7px;padding:13px 12px;border-radius:14px;background:#151b23;border:1px solid #232c38;cursor:pointer;min-height:86px}
+.sopt{position:relative;display:flex;flex-direction:column;gap:7px;padding:13px 12px;border-radius:14px;background:#151b23;border:1px solid #232c38;cursor:pointer;min-height:86px}
 .sopt .si{width:32px;height:32px;border-radius:10px;background:#1c2531;display:flex;align-items:center;justify-content:center;color:#9fc0ff}
 .sopt .si svg{width:17px;height:17px}
 .sopt .st{font-size:13.5px;font-weight:600}
 .sopt .sd{font-size:10px;color:#7d8796;line-height:1.4}
-.sopt input{display:none}
+.sopt input{position:absolute;left:8px;bottom:8px;width:1px;height:1px;opacity:0;pointer-events:none}
 .sheet.list .sgrid{grid-template-columns:1fr;gap:7px}
 .sheet.list .sopt{flex-direction:row;align-items:center;gap:12px;min-height:0;padding:11px 12px}
 .sheet.list .sopt .sd{margin-left:auto;text-align:right;max-width:120px}
@@ -217,6 +219,7 @@ var S = {
   panel: false,
   debug: false,
   sheetLayout: P.sheet === 'list' ? 'list' : 'grid',
+  pathMode: P.paths === 'draft' ? 'draft' : 'inject',
   speed: P.speed || 'std',
   inj: P.fail || 'none',
   draft: '',
@@ -298,7 +301,7 @@ function seed(demo){
     addDemo(3, '');
     var x = S.tray[0]; x.path = inboxPath(x, 0);
     S.chips.push({ id:x.id, name:x.name, path:x.path, size:x.size, file:x });
-    S.draft = '[附件] ' + x.path;
+    if (S.pathMode === 'draft') S.draft = '[附件] ' + x.path;
     S.tray = S.tray.filter(function(v){ return v.id !== x.id; });
     var y = S.tray[1]; y.status = 'err'; y.loaded = Math.round(y.size * 0.62); y.err = 'NET';
     var z = S.tray[2]; z.status = 'err'; z.loaded = 0; z.err = '413';
@@ -313,7 +316,7 @@ function seed(demo){
     }
     S.tray = [];
     S.chips = paths.map(function(it){ return { id:it.id, name:it.name, path:it.path, size:it.size, file:it }; });
-    S.draft = S.chips.map(function(c){ return '[附件] ' + c.path; }).join('\n');
+    if (S.pathMode === 'draft') S.draft = S.chips.map(function(c){ return '[附件] ' + c.path; }).join('\n');
     if (demo === 'sent'){
       var atts = S.chips.slice();
       S.chips = []; S.draft = '';
@@ -397,9 +400,14 @@ function composerHTML(){
   if (S.chips.length){
     h += '<div class="chips">';
     S.chips.forEach(function(c){
-      h += '<div class="chip">' + ICON.clip + '<span>' + esc(c.name) + '</span><button data-act="unchip" data-id="' + c.id + '">×</button></div>';
+      h += '<div class="chip">' + ICON.clip + '<span>' + esc(c.name) + '</span>'
+        + '<i class="csz">' + (c.size / 1048576).toFixed(2) + ' MB</i>'
+        + '<button data-act="unchip" data-id="' + c.id + '">×</button></div>';
     });
     h += '</div>';
+    h += '<div class="chipnote">' + (S.pathMode === 'inject'
+      ? '路径已加入本会话上下文 · agent 下一轮能看到（撤 chip 不撤上下文）'
+      : '路径已写进草稿，会随这条消息一起发出') + '</div>';
   }
   h += '<div class="inputrow"><textarea class="ta" id="draft" rows="1" placeholder="发消息…">' + esc(S.draft) + '</textarea>'
     + '<button class="plus" data-act="sheet">' + ICON.plus + '</button>'
@@ -455,11 +463,13 @@ function panelHTML(){
   return h + '</div></div>';
 }
 function debugHTML(){
-  var url = '?demo=chat&sheet=' + S.sheetLayout + '&speed=' + S.speed + '&fail=' + S.inj;
+  var url = '?demo=chat&sheet=' + S.sheetLayout + '&paths=' + S.pathMode + '&speed=' + S.speed + '&fail=' + S.inj;
   var h = '<div class="sheet" data-act="debug-bg"><div class="inner">'
     + '<h3><span>调试 · ' + DEVICE + '</span><button class="cancelrow" style="width:64px;height:28px;margin:0;font-size:11px" data-act="debug-close">关闭</button></h3>'
     + '<div class="dl">+ 号面板布局</div><div class="row">'
     + opt('sh-grid', '网格 2×2', S.sheetLayout === 'grid') + opt('sh-list', '列表 4 行', S.sheetLayout === 'list') + '</div>'
+    + '<div class="dl">路径怎么交给 agent</div><div class="row">'
+    + opt('pm-inject', '上下文注入（不进输入框）', S.pathMode === 'inject') + opt('pm-draft', '写进草稿', S.pathMode === 'draft') + '</div>'
     + '<div class="dl">速度</div><div class="row">'
     + opt('sp-fast', '快', S.speed === 'fast') + opt('sp-std', '标准', S.speed === 'std') + opt('sp-weak', '弱网', S.speed === 'weak') + '</div>'
     + '<div class="dl">失败注入（下一批生效）</div><div class="row">'
@@ -523,7 +533,6 @@ document.addEventListener('click', function(ev){
   if (!t) return;
   var act = t.getAttribute('data-act');
   if (act === 'pick') return;
-  ev.preventDefault();
   switch (act){
     case 'sheet': S.sheet = true; render(); break;
     case 'sheet-close': S.sheet = false; render(); break;
@@ -535,6 +544,8 @@ document.addEventListener('click', function(ev){
     case 'debug-bg': if (ev.target === t){ S.debug = false; render(); } break;
     case 'sh-grid': S.sheetLayout = 'grid'; render(); break;
     case 'sh-list': S.sheetLayout = 'list'; render(); break;
+    case 'pm-inject': S.pathMode = 'inject'; render(); break;
+    case 'pm-draft': S.pathMode = 'draft'; render(); break;
     case 'sp-fast': S.speed = 'fast'; render(); break;
     case 'sp-std': S.speed = 'std'; render(); break;
     case 'sp-weak': S.speed = 'weak'; render(); break;
@@ -648,10 +659,13 @@ function succeedItem(it){
   it.status = 'ok'; it.loaded = it.size;
   it.path = inboxPath(it, S.chips.length + S.tray.filter(function(x){ return x.status === 'ok'; }).length);
   S.chips.push({ id:it.id, name:it.name, path:it.path, size:it.size, file:it });
-  S.draft = (S.draft ? S.draft.replace(/\s+$/, '') + '\n' : '') + '[附件] ' + it.path;
+  if (S.pathMode === 'draft') S.draft = (S.draft ? S.draft.replace(/\s+$/, '') + '\n' : '') + '[附件] ' + it.path;
   S.tray = S.tray.filter(function(x){ return x.id !== it.id; });
   render();
-  if (!S.tray.length){ stopLoop(); toast('已写入工作区 · 点「在文件树中查看」核对落点', 'view-files'); }
+  if (!S.tray.length){
+    stopLoop();
+    toast(S.pathMode === 'inject' ? '已写入工作区 · 路径已加入本会话上下文，agent 下一轮能看到' : '已写入工作区 · 路径已进草稿', 'view-files');
+  }
   else pump();
 }
 function cancelItem(id){
@@ -674,8 +688,10 @@ function unChip(id){
   var c = S.chips.filter(function(x){ return x.id === id; })[0];
   if (!c) return;
   S.chips = S.chips.filter(function(x){ return x.id !== id; });
-  var lines = S.draft.split('\n').filter(function(l){ return l.replace(/\s+$/, '') !== '[附件] ' + c.path; });
-  S.draft = lines.join('\n');
+  if (S.pathMode === 'draft'){
+    var lines = S.draft.split('\n').filter(function(l){ return l.replace(/\s+$/, '') !== '[附件] ' + c.path; });
+    S.draft = lines.join('\n');
+  }
   render();
   toast('已移出草稿 · 工作区里的文件还在');
 }
@@ -744,6 +760,34 @@ if (clock) clock.textContent = ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMi
     var d = document.createElement('pre'); d.id='metrics';
     d.textContent = JSON.stringify({ iw:innerWidth, ih:innerHeight, dev:r('.device'), app:r('.app'), top:r('.topbar'), msgs:r('.msgs'), comp:r('.composer'), tray:r('.tray'), input:r('.inputrow'), cs:getComputedStyle(document.querySelector('.composer')).paddingBottom });
     document.body.appendChild(d);
+  }, 200);
+})();
+</script>
+
+<script>
+(function(){
+  if (location.search.indexOf('probe=1') < 0) return;
+  setTimeout(function(){
+    var plus = document.querySelector('[data-act="sheet"]');
+    plus.click();
+    setTimeout(function(){
+      var lab = document.querySelector('.sopt');
+      var inp = lab ? lab.querySelector('input[type=file]') : null;
+      var got = false;
+      if (inp) inp.addEventListener('click', function(){ got = true; });
+      var ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+      if (lab) lab.dispatchEvent(ev);
+      var d = document.createElement('pre'); d.id = 'probeout';
+      d.textContent = JSON.stringify({
+        label: !!lab,
+        prevented: ev.defaultPrevented,
+        inputGotClick: got,
+        display: inp ? getComputedStyle(inp).display : null,
+        accept: inp ? inp.getAttribute('accept') : null,
+        capture: inp ? inp.getAttribute('capture') : null
+      });
+      document.body.appendChild(d);
+    }, 120);
   }, 200);
 })();
 </script>
