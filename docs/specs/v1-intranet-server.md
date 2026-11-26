@@ -1,6 +1,6 @@
 # DSH 内网服务器与手机客户端 v1 实施规格
 
-> 状态：v1.0 定稿（2026-11-26）· 类型：可实施规格 · 地图：[DSH 内网服务器与手机客户端 v1](https://github.com/Ar1-s/dsh_dev/issues/1)
+> 状态：v1.1（2026-11-26，生产 smoke 修正）· 类型：可实施规格 · 地图：[DSH 内网服务器与手机客户端 v1](https://github.com/Ar1-s/dsh_dev/issues/1)
 >
 > 本文件是地图 #1 的目的地交付物。它把 #2–#14 已收口的结论合拢成一份可以直接照做的规格；实现代码不在本轮，实施按 §13 的顺序拆票。
 >
@@ -302,6 +302,7 @@ ENTRYPOINT ["/usr/local/bin/dsh-entrypoint"]
 - 运行阶段不装 pnpm、不需要外网；插件已随 profile 的 `node_modules` 打好。
 - 只 `COPY` 运行所需；`/opt/plugins` 保留源目录便于排障与 `file:` 路径一致。
 - HEIC 解码依赖在构建期装进 profile（见 §9.9）；不要依赖运行期安装。
+- **npm 11 的 allowScripts**：DSH 依赖里 `@deepseek-ai/dsh-subprocess-local`、`koffi`、`node-pty`、`protobufjs` 有 install/postinstall 脚本；npm 11 默认把它们标成 pending，`npm install` 只打 warning。构建必须显式 `npm install-scripts approve <pkg>`（精确版本）并重跑重建，或在冒烟中验证 `koffi`/`node-pty`/`subprocess-local` 可加载且 PTY 可用；不要把 warning 当通过。
 - seed 指纹必须包含 `BUILD_REVISION`（构建 commit）或插件文件哈希：只哈希 profile 文件时，插件源码变了但版本号没变会导致卷里的旧 profile 不刷新。
 - 若激光插件仓是私有的，构建机的只读凭据只用于 clone；不要把 token 写进 Dockerfile、构建参数或镜像层。
 
@@ -1342,7 +1343,7 @@ window.__ModuleLoader__.load({
 ### 10.5 失败隔离
 
 - 宿主半：`apply`/handler 全 try/catch；返回 JSON 错误；不抛到顶层；不 fire-and-forget。
-- 浏览器半：bundle 必须能被 client-modules 解析；`load id` = 包名；`exports["./client"]` 存在；文件缺失/畸形会让整机启动失败（S）。构建期必须真实起一次 DSH 并请求 `/plugins/@local/dsh-file-bridge/client.js`。
+- 浏览器半：bundle 必须能被 client-modules 解析；`load id` = 包名；`exports["./client"]` 存在；文件缺失/畸形会让整机启动失败（S）。构建期必须真实起一次 DSH，并从 index 提取包含 `@local/dsh-file-bridge/client.js` 的批量 URL（rc.5 形如 `plugins/??@local/…/client.js&rev=<hash>`）发 GET 200；直接 `/plugins/<pkg>/client.js` 在 rc.5 是 404，不是正确断言。
 - 容器：`restart: unless-stopped`；healthcheck 接受 401；entrypoint 断言两个插件；构建期冒烟。
 - 明确接受：插件 bug 与 DSH 同生共死；v1 不做进程隔离（#14）。
 
@@ -1438,7 +1439,7 @@ docker run --rm \
 
 - [ ] [桌面] 镜像构建成功；`%TSD-Header-` 扫描通过；`--dump-config` 输出包含 `@local/dsh-laser-report` 与 `@local/dsh-file-bridge` 两个 row，无 `skipping`/`did not activate`/`startup failed`。
 - [ ] [桌面] 启动日志出现 `dsh web:`；未认证 `GET /` 返回 401（或 Caddy 302 到登录页）。
-- [ ] [桌面] 浏览器请求 `GET /plugins/@local/dsh-file-bridge/client.js` 返回 200，且 `load id` 等于包名。
+- [ ] [桌面] 从 index 提取包含 `@local/dsh-file-bridge/client.js` 的批量 URL（rc.5 形如 `plugins/??…client.js&rev=<hash>`），GET 返回 200；直接 `/plugins/<pkg>/client.js` 404 属预期。`load id` 等于包名。
 - [ ] [桌面] DSH 端口未发布；Caddy 是唯一 80/443 入口；`docker compose ps` 只有一个对外服务。
 - [ ] [桌面] profile seed 指纹刷新：改镜像 tag 重建后，`$DSH_HOME/profiles/web` 被替换且旧目录留下最多 3 份 bak；两插件仍加载。
 - [ ] [桌面] `profiles/web/package.json` 两个本地插件均为精确版本，无 `^`/`~`；`compatibility.json` 为空。
@@ -1497,7 +1498,8 @@ docker run --rm \
 
 ### F. 打包、升级、回滚
 
-- [ ] [运维] 构建期真实起一次 DSH：`dsh web:` 行、`GET /` 401、两插件 row、client bundle 200、杀进程；脚本非零退出即失败。
+- [ ] [运维] 构建期真实起一次 DSH：`dsh web:` 行、`GET /` 401、两插件 row、批量 client bundle URL 200、杀进程；脚本非零退出即失败。
+- [ ] [运维] install-scripts：4 个 native 包已 approve/rebuild，`koffi`/`node-pty`/`subprocess-local` 可加载且 PTY 可用；不能只看 npm warning。
 - [ ] [运维] 升级演练：新镜像 tag + staging 卷副本跑完 A–E 冒烟；切 tag 后旧会话/旧文件/旧 cookie 可用。
 - [ ] [运维] 回滚演练：上一 tag + 升级前快照恢复；两插件在、上传可用、数据一致。
 - [ ] [运维] 备份恢复演练：从 `/srv/dsh/backups` 恢复到 staging；登录、会话、inbox、manifest 可读。
@@ -1704,3 +1706,20 @@ docker run --rm \
 3. M3 前完成 reference codec spike；M2 前完成 HEIC Linux spike；M1 前完成 Caddy Secure/entrypoint spike。
 4. 目标 Linux 主机 + iOS/Android 真机验收；证据贴回实施票。
 5. 全部通过后关闭地图 #1；手机移动壳/多设备/公网/SSO 另开 effort。
+
+---
+
+## 19. 生产 smoke 记录（2026-11-26，隔离测试容器）
+
+> 目的：在不碰生产容器/服务的前提下，验证 rc.5 能启动、认证可用、90 天补丁与 client bundle 路由。不是完整 M1。
+
+- 宿主：Ubuntu 22.04.5，Docker 29.2.1，20 核 / 31 GiB，/data 738G 可用；现有 4 个容器（postgres_db、node01/02/03）与 8081/18090 两个服务未动。
+- 隔离：/data/dsh-test；专用 bridge 网络 dsh-test-net；容器 dsh-test-20261126；仅发布 127.0.0.1:13080->3080；uid 1000；6 GiB/2 CPU/pids 256；no-new-privileges。
+- 运行时：node:24-bookworm-slim@sha256:873f586f3794f52281bd039bf02c048a0be08fde619338f9941bad1eb6b34530（Node 24.22.3）；npm 11.19.1；DSH 0.2.2-rc.5；npm install 671 包；启动日志出现 dsh web:。
+- 认证：未认证 GET / = 401；token GET /?token=... = 303 + Set-Cookie；默认 Max-Age=2592000（30 天）；加 --patch connection.yml 后 Max-Age=7776000（90 天）；cookie 有 HttpOnly/SameSite=Strict；带 cookie GET / = 200。
+- client bundle：index 用的是**批量** URL plugins/??<pkg>/client.js,...&rev=<hash>；带 rev GET = 200（25,885 B），不带 rev = 404；直接 /plugins/<pkg>/client.js = 404。**规格已据此修正验收断言。**
+- npm scripts：npm 11 把 @deepseek-ai/dsh-subprocess-local、koffi、node-pty、protobufjs 的脚本标为 pending；本次 koffi/node-pty/subprocess-local 的 require 仍 OK，但 PTY/终端端到端未验。构建必须显式 approve/rebuild 或做同等冒烟，不能只看 warning。
+- 网络：DockerHub 直连不可达；配置的 mirror 首次拉 node 镜像约 8 分钟后成功；Caddy 2.11 镜像拉取 7+ 分钟未完成，已取消；npm registry、nodejs.org 可达；github.com 在本机 curl 超时。
+- 未验证：Caddy/TLS/Set-Cookie Secure（镜像拉取超时）、文件桥五条路由（插件未构建）、手机真机、PTY/终端端到端、升级回滚/备份。
+- 清理：测试容器、专用网络、node 镜像与 `/data/dsh-test` 已删除；生产 4 个容器未动。
+
