@@ -940,7 +940,7 @@ Content-Length: 123456
 3. 校验 metadata.sessionId 与请求一致；不一致 403 `commit/session-mismatch`。
 4. 计算最终目录 `inbox/YYYY/MM/DD/<device>/`（UTC 日期，取**提交时刻**）；`mkdir -p`。
 5. 计算最终文件名（§9.6）；若已存在则加 `-2`/`-3`，**绝不覆盖**。
-6. `fsync` pending 文件；`rename(pending, final)`（同一文件系统，原子）；`fsync` 目标目录。
+6. `fsync` pending 文件；先把 `_meta/requests/<requestId>.json` 改为 `committing` 并写入目标 `path`、`fsync`；`rename(pending, final)`（同一文件系统，原子）；`fsync` 目标目录。
 7. 追加 manifest 行（`O_APPEND` + `fsync`）；写 `_meta/requests/<requestId>.json` 为 `committed`；删除 pending metadata。
 8. 返回 200：
 
@@ -1240,7 +1240,7 @@ import { join } from 'node:path'
 import heicConvert from 'heic-convert'
 
 export const name = '@local/dsh-file-bridge'
-export const inject = ['connection']
+export const inject = ['connection', 'agents']
 
 export async function apply(ctx) {
   // 1) 解析/校验工作区；失败只 warning，不抛（避免带崩 DSH）
