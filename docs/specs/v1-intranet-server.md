@@ -1,6 +1,6 @@
 # DSH 内网服务器与手机客户端 v1 实施规格
 
-> 状态：v1.2（2026-11-26，插件启停与本地优先补充）· 类型：可实施规格 · 地图：[DSH 内网服务器与手机客户端 v1](https://github.com/Ar1-s/dsh_dev/issues/1)
+> 状态：v1.3（2026-11-27，插件启停管理 API 扩展性补充）· 类型：可实施规格 · 地图：[DSH 内网服务器与手机客户端 v1](https://github.com/Ar1-s/dsh_dev/issues/1)
 >
 > 本文件是地图 #1 的目的地交付物。它把 #2–#14 已收口的结论合拢成一份可以直接照做的规格；实现代码不在本轮，实施按 §13 的顺序拆票。
 >
@@ -1736,12 +1736,12 @@ docker run --rm \
 
 ### 20.1 范围
 
-v1.2 只做**全局**插件启用/禁用：一个 profile，所有客户端看到同一张 Host 插件图。不做 per-user/per-device，不做移动端专用插件表，不做运行时 install/remove。
+本规格仍然只做**全局**插件启用/禁用：一个 profile，所有客户端看到同一张 Host 插件图。不做 per-user/per-device，不做移动端专用插件表，不做运行时 install/remove。
 
 ### 20.2 管理面
 
 - 原生 Web 侧栏「插件」页就是管理界面；它调用 `ctx.pluginManager` 的 `listPlugins` / `listBundles` / `setPluginEnabled` / `setBundleEnabled`，写 `profiles/web/cordis.patch.yml` 与 `dsh.profile.bundles`。
-- 如果要独立管理员 API，做一个薄插件：`ctx.inject(['connection','pluginManager'], ...)`，注册 `/api/admin/plugins` 精确 Fetch 路由，只封装 list/toggle；加独立管理员鉴权/审计；不要 import 内部实现。只做启停不需要 pnpm。
+- 如果要独立管理员 API，做一个薄插件：`ctx.inject(['connection','pluginManager'], ...)`，注册 `/api/admin/plugins` 精确 Fetch 路由，只封装 list/toggle；加独立管理员鉴权/审计；不要 import 内部实现。只做启停不需要 pnpm。管理员 API 只做 row 级，不调用 `setBundleEnabled` / `installBundle` / `removeBundle`；扩展与多插件兼容见 §20.7。
 - 管理类插件与预设行可能只读（`management-required` / `unaddressable`）；不要试图绕过。
 
 ### 20.3 客户端同步
@@ -1765,3 +1765,12 @@ v1.2 只做**全局**插件启用/禁用：一个 profile，所有客户端看�
 ### 20.6 维护窗口
 
 插件表很少变；简单 leaf UI 插件启停可在工作时段做，但建议窗口；bundle install/remove、core/management、DSH 镜像升级必须窗口。变更前备份 profile；变更后按 §12 验证。
+
+### 20.7 扩展与多插件兼容（2026-11-27 补充）
+
+- 管理员 API 是**通用 row 适配器**：每次请求从 `ctx.pluginManager.listPlugins()` 发现行，不硬编码插件名、行数或 bundle 布局；构建期新增 bundle/row 在 seed 刷新后自动出现在列表里，无需改 API。
+- 列表返回 `protocol: 1`、`entryId`/`patchId`、`bundle`、`moduleName`、`name`、`enabled`、`readOnlyReason`；`entryId` 是启停键，显示名不能当键。支持 `bundle`（精确）、`enabled`（true/false）、`q`（name/moduleName 子串）过滤；默认返回完整列表，按 `entryId` 稳定排序；v1 不做分页，后续可加 `nextCursor`。
+- **单行隔离**：一次调用只改一个 `entryId`；同一 bundle 的其他 row 保持各自状态。原生依赖方可能因服务变化重载，但它们的持久化启停状态不变。多插件 profile 至少 3 个可切换 leaf 行做隔离测试。
+- **契约只做加法**：现有 `GET /api/admin/plugins` 与 `POST /api/admin/plugins/toggle` 的字段/语义不变；新字段可加，客户端忽略未知字段。未来 bundle 级、install/remove、运行时安装用新增端点（如 `/api/admin/bundles`、`/api/admin/plugins/install`），不重载 row toggle。
+- **扩展路径**：构建期新增 bundle → seed 的 profile 依赖与 `dsh.profile.bundles` → entrypoint seed 刷新 → 新 row 出现 → admin API 自动可见。运行期 install/remove 仍不在 v1；若后续启用，另增 install 端点并明确 `restart-required` 语义，不改现有 row 契约。
+- 验收测试见 #15：多插件隔离、构建期新增插件自动发现、协议加法兼容。
