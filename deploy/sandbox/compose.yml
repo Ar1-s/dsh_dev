@@ -1,0 +1,86 @@
+# T1 local multi-plugin sandbox.
+#
+# Project name, container name, network, and volume are all explicit and
+# sandbox-specific. Nothing here touches the production deployment or unknown
+# Docker resources. Only a loopback host port is published.
+name: dsh-sandbox
+
+services:
+  dsh:
+    build:
+      context: .
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:24-bookworm-slim}
+    image: dsh-sandbox:0.2.2-rc.5
+    container_name: dsh-sandbox-dsh
+    hostname: dsh-sandbox
+    environment:
+      DSH_HOME: /data/dsh-home
+      HOME: /data/dsh-home
+      TMPDIR: /tmp
+    ports:
+      - "127.0.0.1:${SANDBOX_PORT:-38080}:3080"
+    volumes:
+      - dsh-home:/data/dsh-home
+    networks:
+      - sandbox
+    read_only: true
+    tmpfs:
+      - /tmp:rw,exec,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "node", "/usr/local/bin/dsh-sandbox-health.mjs"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  smoke:
+    build:
+      context: ./smoke
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:24-bookworm-slim}
+    image: dsh-sandbox-smoke:0.2.2-rc.5
+    profiles: ["smoke"]
+    network_mode: "service:dsh"
+    depends_on:
+      dsh:
+        condition: service_healthy
+    volumes:
+      - dsh-home:/dsh-home:ro
+      - ./artifacts:/artifacts
+    environment:
+      DSH_LOG: /dsh-home/dsh.log
+      DSH_LOGIN_TIMEOUT_MS: "90000"
+      DSH_SMOKE_ARTIFACTS: /artifacts
+    shm_size: "256mb"
+    init: true
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  dsh-home:
+    name: dsh-sandbox-dsh-home
+
+networks:
+  sandbox:
+    name: dsh-sandbox-net

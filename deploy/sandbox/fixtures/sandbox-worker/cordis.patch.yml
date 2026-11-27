@@ -1,0 +1,4 @@
+- insert:
+    - id: sandbox-worker
+      name: '@local/sandbox-worker'
+      config: {}

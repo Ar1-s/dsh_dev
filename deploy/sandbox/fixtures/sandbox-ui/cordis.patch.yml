@@ -1,0 +1,4 @@
+- insert:
+    - id: sandbox-ui
+      name: '@local/sandbox-ui'
+      config: {}

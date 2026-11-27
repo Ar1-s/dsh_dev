@@ -1,0 +1,21 @@
+{
+  "name": "@local/sandbox-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "T1 sandbox fixture: host-only plugin with no client half.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

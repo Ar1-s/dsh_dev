@@ -1,0 +1,4 @@
+- insert:
+    - id: sandbox-host
+      name: '@local/sandbox-host'
+      config: {}

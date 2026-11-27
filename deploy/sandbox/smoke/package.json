@@ -1,0 +1,10 @@
+{
+  "name": "dsh-sandbox-smoke",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chromium smoke test for the T1 DSH multi-plugin sandbox.",
+  "type": "module",
+  "dependencies": {
+    "puppeteer-core": "25.19.0"
+  }
+}
